@@ -12,7 +12,7 @@ def main():
         
     scene : Scene = Scene()
     mySphere : Sphere = Sphere(position=[0.0, 0.0, 0.0], radius=1.0)
-    camera : Camera = Camera(pos=[0.0, 0.0, 5.0], rot=[0.0, 0.0, 0.0], fov=90.0, near=0.1, far=10.0, film=film)
+    camera : Camera = Camera(pos=[0.0, 0.0, 5.0], rot=[0.0, 0.0, 3.14], fov=90.0, near=0.1, far=10.0, film=film)
 
     scene.add_sphere(mySphere)
     scene.set_camera(camera)

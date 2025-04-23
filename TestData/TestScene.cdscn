@@ -1,0 +1,5 @@
+{Scene: Scene, Film: {Width: 1920, Height: 1080}, Camera: {Position: [0.0, 0.0, -5.363903522491455],
+    Rotation: [1.5707964897155762, 0.0, -0.0], FOV: 0.6911112070083618, NearPlane: 0.10000000149011612,
+    FarPlane: 1000.0}, Entities: [{EntityID: 5131187757977497479, TagComponent: {
+        Tag: RT_Sphere}, TransformComponent: {Position: [0.0, 0.0, 0.0], Rotation: [
+          0.0, 0.0, 0.0], Scale: [1.0, 1.0, 1.0]}, SphereComponent: {Radius: 1.0}}]}

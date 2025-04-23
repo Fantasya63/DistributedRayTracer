@@ -9,14 +9,18 @@ class Scene:
         self.cubes = []
         self.planes = []
 
+
     def set_camera(self, cam : Camera):
         self.camera = cam
+
 
     def add_sphere(self, sphere : Sphere):
         self.spheres.append(sphere)
 
+
     def add_cube(self, cube : Cube):
         self.cubes.append(cube)
+
 
     def add_plane(self, plane : Plane):
         self.planes.append(plane)
