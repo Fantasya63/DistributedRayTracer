@@ -3,7 +3,12 @@ from Renderer.Renderer import Renderer
 from Renderer.Film import Film
 from Renderer.Camera import Camera
 from Scene.Scene import Scene
+from Scene.SceneSerializer import SceneSerializer
 from Scene.RTPrimitives import Sphere
+from Log.Logger import *
+
+import numpy as np
+import math
 
 def main():    
     # Image dimensions
@@ -11,14 +16,19 @@ def main():
 
         
     scene : Scene = Scene()
-    mySphere : Sphere = Sphere(position=[0.0, 0.0, 0.0], radius=1.0)
-    camera : Camera = Camera(pos=[0.0, 0.0, 5.0], rot=[0.0, 0.0, 3.14], fov=90.0, near=0.1, far=10.0, film=film)
+    serializer : SceneSerializer = SceneSerializer(scene)
+    serializer.DeserializeSceneRuntime("TestData/TestScene.cdscn")
 
-    scene.add_sphere(mySphere)
-    scene.set_camera(camera)
+    # scene.camera.set_rotation([0.0, 90.0, 0.0])
+    scene.camera.set_FOV(90.0)
+
+    rot_matrix = scene.camera.get_rot_matrix()
+    LogInfo(f"Forward: {rot_matrix @ np.array([0.0, 0.0, 1.0], dtype=np.float32) }")
+    LogInfo(f"Right  : {rot_matrix @ np.array([1.0, 0.0, 0.0], dtype=np.float32)}")
+    LogInfo(f"UP     : {rot_matrix @ np.array([0.0, 1.0, 0.0], dtype=np.float32)}")
 
     renderer = Renderer()
-    renderer.Render(scene, film)
+    renderer.Render(scene, film, 32)
 
 
 

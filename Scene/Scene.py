@@ -8,6 +8,7 @@ class Scene:
         self.spheres = []
         self.cubes = []
         self.planes = []
+        self.materials = []
 
 
     def set_camera(self, cam : Camera):

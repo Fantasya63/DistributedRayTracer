@@ -1,15 +1,18 @@
+# ANSI color codes
+RESET = "\033[0m"
+CYAN = "\033[96m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+MAGENTA = "\033[95m"
 
+def LogInfo(_info: str):
+    print(f"{CYAN}[APP] Info: {_info}{RESET}")
 
-def LogInfo(_info : str):
-    print(f"[APP] Info: {_info}")
+def LogError(_err: str):
+    print(f"{RED}[APP] Error! {_err}{RESET}")
 
+def CoreLogInfo(_info: str):
+    print(f"{YELLOW}[Core] Info: {_info}{RESET}")
 
-def LogError(_err : str):
-    print(f"[APP] Error! {_err}")
-
-
-def CoreLogInfo(_info : str):
-    print(f"[Core] Info: {_info}")
-
-def CoreLogError(_err : str):
-    print(f"[Core] Error! {_err}")
+def CoreLogError(_err: str):
+    print(f"{MAGENTA}[Core] Error! {_err}{RESET}")

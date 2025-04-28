@@ -1,67 +1,84 @@
 import numpy as np
 import math
 
-from Renderer import Film
-
-
 class Camera:
-    # TODO: Add a change aspect method
-    def __init__(self, pos, rot, fov, near, far, film : Film):
+    def __init__(self, pos, rot, fov, near, far, film):
         self.position = np.array(pos, dtype=np.float32)
-        self.rotation = np.array(rot, dtype=np.float32)
+        self.rotation = np.radians(rot).astype(np.float32)  # (yaw, pitch, roll) in degrees
         self.fov = math.radians(fov)
         self.aspect = film.width / film.height
         self.near = near
         self.far = far
-        self.viewProjection = self._compute_view_proj()
-        self.film : Film = film
-   
+        self.film = film
 
-    def _compute_view_proj(self):
-        
-        # Rotation Matrix
-        pitch, yaw, roll = self.rotation
-        cos_p, sin_p = np.cos(pitch), np.sin(pitch)
-        cos_y, sin_y = np.cos(yaw), np.sin(yaw)
-        cos_r, sin_r = np.cos(roll), np.sin(roll)
+        self.view_matrix = self._compute_view_matrix()
+        self.projection_matrix = self._compute_projection_matrix()
+        self.view_projection = self.projection_matrix @ self.view_matrix
 
-        rot_matrix_3x3 = np.array([
-            [
-                cos_y * cos_r + sin_y * sin_p * sin_r,
-                sin_y * cos_p,
-                cos_y * sin_r - sin_y * sin_p * cos_r
-            ],
-            [
-                -sin_y * cos_r + cos_y * sin_p * sin_r,
-                cos_y * cos_p,
-                -sin_y * sin_r - cos_y * sin_p * cos_r
-            ],
-            [
-                -cos_p * sin_r,
-                sin_p,
-                cos_p * cos_r
-            ]
+    def set_rotation(self, rot):
+        self.rotation = np.radians(rot).astype(np.float32)
+        # self.rotation = np.array(rot, dtype=np.float32)
+        self.view_matrix = self._compute_view_matrix()
+        self.projection_matrix = self._compute_projection_matrix()
+        self.view_projection = self.projection_matrix @ self.view_matrix
+
+    def set_FOV(self, fov):
+        self.fov = math.radians(fov)
+        self.projection_matrix = self._compute_projection_matrix()
+        self.view_projection = self.projection_matrix @ self.view_matrix
+
+
+    def _rotation_matrix_yaw_pitch_roll(self, pitch, yaw, roll):
+        # Yaw (Y-axis)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        # Pitch (X-axis)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        # Roll (Z-axis)
+        cr, sr = math.cos(roll), math.sin(roll)
+
+        # Combine rotations (Z * X * Y)
+        rot = np.array([
+            [cy * cr + sy * sp * sr, sr * cp, -sy * cr + cy * sp * sr],
+            [-cy * sr + sy * sp * cr, cr * cp, sr * sy + cy * sp * cr],
+            [sy * cp, -sp, cy * cp]
         ], dtype=np.float32)
-        rot_matrix = np.eye(4, dtype=np.float32)
-        rot_matrix[:3, :3] = rot_matrix_3x3
 
-        # Translation Matrix
-        trans_matrix = np.eye(4, dtype=np.float32)
-        trans_matrix[:3, 3] = -self.position
+        return rot
+    
 
-        # View Matrix
-        view_matrix = np.dot(rot_matrix, trans_matrix)
+    def get_rot_matrix(self):
+        return self._rotation_matrix_yaw_pitch_roll(*self.rotation)
 
-        # Create projection matrix
-        tan_half_fov = np.tan(self.fov / 2)
-        proj_matrix = np.zeros((4, 4), dtype=np.float32)
-        proj_matrix[0, 0] = 1.0 / (self.aspect * tan_half_fov)
-        proj_matrix[1, 1] = 1.0 / tan_half_fov
-        proj_matrix[2, 2] = -(self.far + self.near) / (self.far - self.near)
-        proj_matrix[2, 3] = -(2 * self.far * self.near) / (self.far - self.near)
-        proj_matrix[3, 2] = -1.0
 
-        # Combine view and projection matrices
-        view_proj_matrix = np.dot(proj_matrix, view_matrix)
-        
-        return view_proj_matrix
+    def _compute_view_matrix(self):
+        # Calculate rotation matrix from yaw, pitch, roll
+        rot = self._rotation_matrix_yaw_pitch_roll(*self.rotation)
+
+        # Basis vectors
+        right = rot[:, 0]
+        up = rot[:, 1]
+        forward = -rot[:, 2]  # -Z is forward in RH
+
+        # Build view matrix (right-handed)
+        mat = np.identity(4, dtype=np.float32)
+        mat[0, :3] = right
+        mat[1, :3] = up
+        mat[2, :3] = forward
+        mat[0, 3] = -np.dot(right, self.position)
+        mat[1, 3] = -np.dot(up, self.position)
+        mat[2, 3] = -np.dot(forward, self.position)
+
+        return mat
+
+    def _compute_projection_matrix(self):
+        f = 1.0 / math.tan(self.fov / 2.0)
+        z_range = self.near - self.far
+
+        mat = np.zeros((4, 4), dtype=np.float32)
+        mat[0, 0] = f / self.aspect
+        mat[1, 1] = f
+        mat[2, 2] = (self.far + self.near) / z_range
+        mat[2, 3] = -1.0
+        mat[3, 2] = (2 * self.near * self.far) / z_range
+
+        return mat

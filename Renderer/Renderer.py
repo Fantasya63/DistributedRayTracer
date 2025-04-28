@@ -1,112 +1,373 @@
+# renderer.py
+
 from numba import cuda
 from PIL import Image
 import numpy as np
 import math
+import sys
+from datetime import datetime
+from numba.cuda.random import (
+    create_xoroshiro128p_states,
+    xoroshiro128p_uniform_float32
+)
+
 
 from Scene.Scene import Scene
 from Renderer.Film import Film
 from Renderer.RTUtils import *
-
+from Log.Logger import *
+from numba.cuda.cudadrv.error import CudaSupportError
 
 
 @cuda.jit(device=True)
-def ray_sphere_intersect(ray_origin, ray_dir, sphere_pos, sphere_radius):
+def ray_sphere_intersect(ray_origin, ray_dir, sphere_pos, sphere_radius, sphere_index, sphere_material_indices, materials, best_hit):
     oc = cuda.local.array(3, dtype=np.float32)
+    
     for i in range(3):
         oc[i] = ray_origin[i] - sphere_pos[i]
-
+    
     # oc = ray_origin - sphere_pos
     a = ray_dir[0]**2 + ray_dir[1]**2 + ray_dir[2]**2
     b = 2.0 * (oc[0] * ray_dir[0] + oc[1] * ray_dir[1] + oc[2] * ray_dir[2])
     c = oc[0]**2 + oc[1]**2 + oc[2]**2 - sphere_radius**2
     discriminant = b**2 - 4 * a * c
-    if discriminant < 0:
-        return -1.0
-    t = (-b - math.sqrt(discriminant)) / (2.0 * a)
-    return t if t > 0 else -1.0
-
-
-
-
-@cuda.jit
-def Trace(output, width, height, sphere, camPos, viewProj, invViewProj):
-    x, y, = cuda.grid(2)
-
-    if x >= width or y >= height:
+    
+    if discriminant < 0.0:
         return
-   
-    aspect_ratio = width / height
-    ndc_x = ((x + 0.5) / width) * 2.0 - 1.0
-    ndc_y = ((y + 0.5) / height) * 2.0 - 1.0
-   
+
+    t = (-b - math.sqrt(discriminant)) / (2.0 * a)
+
+    if t > 0.0 and t < best_hit[2, 0]:
+        # Position
+        pos = cuda.local.array(3, dtype=np.float32)
+        pos[0] = ray_origin[0] + t * ray_dir[0]
+        pos[1] = ray_origin[1] + t * ray_dir[1]
+        pos[2] = ray_origin[2] + t * ray_dir[2]
+
+
+        # Normal
+        normal = cuda.local.array(3, dtype=np.float32)
+        # vec3_sub(pos, sphere_pos, normal)
+        # vec3_normalize(normal, normal)
+
+        normal[0] = (pos[0] - sphere_pos[0]) / sphere_radius
+        normal[1] = (pos[1] - sphere_pos[1]) / sphere_radius
+        normal[2] = (pos[2] - sphere_pos[2]) / sphere_radius
+
+        material_data = materials[sphere_material_indices[sphere_index]] 
+        # MAterial Data
+        for i in range(3):
+            best_hit[0, i] = pos[i]
+            best_hit[1, i] = normal[i]
+            best_hit[3, i] = material_data[0, i]
+            best_hit[4, i] = material_data[1, i]
+
+        # Hit data:
+        # [0] - position
+        # [1] - normal
+        # [2] - [0] distance, roughness[1], metallic[2]
+        # [3] - albedo
+        # [4] - emission
+
+        # Distance
+        best_hit[2, 0] = t # Distance
+        best_hit[2, 1] = material_data[2, 0]
+        best_hit[2, 2] = material_data[2, 1]
+
+
+
+@cuda.jit(device=True)
+def energy(vec3_color):
+    return (vec3_color[0] * 1.0 / 3.0) + (vec3_color[1] * 1.0 / 3.0) + (vec3_color[2] * 1.0 / 3.0)
+
+
+@cuda.jit(device=True)
+def ray_plane_intersect(ray_origin, ray_dir, plane_normal, plane_dist, plane_index, plane_material_indices, materials, best_hit):
+    point = cuda.local.array(3, dtype=np.float32)
+    for i in range(3):
+        point[i] = plane_normal[i] * plane_dist
+
+    ray_origin_minus_point = cuda.local.array(3, dtype=np.float32)
+    
+    vec3_sub(point, ray_origin, ray_origin_minus_point)
+
+    t = vec3_dot(plane_normal, ray_origin_minus_point)
+    NdotD = vec3_dot(plane_normal, ray_dir)
+    
+    if abs(NdotD) > 1e-6:  # Only proceed if not near zero
+        t /= NdotD
+    else:
+        return
+
+
+    if t > 0.0 and t < best_hit[2, 0]:
+        # Position
+        pos = cuda.local.array(3, dtype=np.float32)
+        pos[0] = ray_dir[0] * t
+        pos[1] = ray_dir[1] * t
+        pos[2] = ray_dir[2] * t
+
+        pos[0] += ray_origin[0]
+        pos[1] += ray_origin[1]
+        pos[2] += ray_origin[2]
+
+
+        
+        material_data = materials[plane_material_indices[plane_index]] 
+        # MAterial Data
+        for i in range(3):
+            best_hit[0, i] = pos[i]
+            best_hit[1, i] = plane_normal[i]
+            # best_hit[1, i] = plane_material_indices[i]
+            best_hit[3, i] = material_data[0, i]
+            best_hit[4, i] = material_data[1, i]
+
+        # Hit data:
+        # [0] - position
+        # [1] - normal
+        # [2] - [0] distance, roughness[1], metallic[2]
+        # [3] - albedo
+        # [4] - emission
+
+        # Distance
+        best_hit[2, 0] = t # Distance
+        best_hit[2, 1] = material_data[2, 0]
+        best_hit[2, 2] = material_data[2, 1]
+
+
+
+@cuda.jit(device=True)
+def generate_camera_rays(ndc_x, ndc_y, inv_view_proj, cam_pos, output):
     # Create ray direction in clip space
     ray_clip = cuda.local.array(4, dtype=np.float32)
     ray_clip[0] = ndc_x
     ray_clip[1] = ndc_y
-    ray_clip[2] = -1.0  # Pointing into the scene
+    ray_clip[2] = 1.0  # Pointing into the scene
     ray_clip[3] = 1.0
+
 
     # Transform to world space (inverse view-projection)
     # Note: For simplicity, we're not computing the full inverse here
     ray_eye = cuda.local.array(4, dtype=np.float32)
-    mat4x4_vec4_multiply(invViewProj, ray_clip, ray_eye)
-
+    mat4x4_vec4_multiply(inv_view_proj, ray_clip, ray_eye)
 
     # Perspective Division
     for i in range(3):
         ray_eye[i] /= ray_eye[3]
     ray_eye[3] = 1.0
 
-    # Convert to direction (w = 0 for direction vectors)
-    ray_world = cuda.local.array(4, dtype=np.float32)
+
+
     for i in range(3):
-        ray_world[i] = ray_eye[i] - camPos[i]
+        output[i] = ray_eye[i] - cam_pos[i]
+
+    vec3_normalize(output, output)
+
+
+@cuda.jit(device=True)
+def IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, hit_data):
+    # Hit data:
+    # [0] - position
+    # [1] - normal
+    # [2] - [0] distance, roughness[1], metallic[2]
+    # [3] - albedo
+    # [4] - emission
+
+
+    # Intersect Spheres
+    for i in range(num_spheres):
+        sphere_center = sphere_position[i][:3]
+        sphere_rad = sphere_radius[i]
+        ray_sphere_intersect(ray_origin, ray_dir, sphere_center, sphere_rad, i, sphere_material_indices, materials, hit_data)
+
+    # Intersect Planes
+    for i in range(num_planes):
+        _plane_normal = plane_normal[i][:3]
+        _plane_dist = plane_dist[i]
+
+        ray_plane_intersect(ray_origin, ray_dir, _plane_normal, _plane_dist, i, plane_material_indices, materials, hit_data)
+
+
+
+@cuda.jit(device=True)
+def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, output):
+    # Hit data:
+    # [0] - position
+    # [1] - normal
+    # [2] - [0] distance, roughness[1], metallic[2]
+    # [3] - albedo
+    # [4] - emission
+
+
+    distance = hit_data[2, 0]
+    if distance < math.inf:
+        hit_specular = 1.0 - hit_data[2, 1]
+        hit_pos = hit_data[0]
+        hit_normal = hit_data[1, :3]
+        hit_color = hit_data[3, :3]
+        for i in range(3):
+            hit_color[i] = min(1.0 - hit_specular, hit_color[i])
+        
+        spec_chance = hit_specular
+        diff_chance = energy(hit_color)
+        
+        ray_origin[0] = hit_pos[0] + hit_normal[0] * 0.001
+        ray_origin[1] = hit_pos[1] + hit_normal[1] * 0.001
+        ray_origin[2] = hit_pos[2] + hit_normal[2] * 0.001
+
+        roulette = xoroshiro128p_uniform_float32(rng_states, thread_id)
+        if roulette < spec_chance:
+            # Specular reflection
+            alpha = smoothness_to_phong_alpha(hit_specular)
+            
+            ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
+            vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
+            vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
+            sample_hemisphere(ray_dir_ref_hit_norm, alpha, rng_states, thread_id, ray_dir)
+            vec3_normalize(ray_dir, ray_dir)
+
+            f = (alpha + 2) / (alpha + 1)
+            
+            for i in range(3):
+                ray_energy[i] *= (1.0 / spec_chance) * hit_specular * sdot_fast(hit_normal, ray_dir, f)
+        
+        elif diff_chance > 0.0 and roulette < spec_chance + diff_chance:
+            # Diffuse reflection
+            sample_hemisphere(hit_normal, 1.0, rng_states, thread_id, ray_dir)
+
+            for i in range(3):
+                ray_energy[i] *= (1.0 / diff_chance) * hit_color[i]
+        else:
+            ray_energy[0] = 0.0
+            ray_energy[1] = 0.0
+            ray_energy[2] = 0.0
+
+        hit_emission = hit_data[4]
+
+        output[0] = hit_emission[0]
+        output[1] = hit_emission[1]
+        output[2] = hit_emission[2]
+    else:
+        # Sky
+        # Erase the ray's energy - the sky doen't reflect anything
+        output[0] = 0.5
+        output[1] = 0.5
+        output[2] = 0.5
+
+@cuda.jit
+def Trace(output, width, height, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, camPos, viewProj, inv_view_proj, num_samples, rng_states):
     
-    ray_world[3] = 0.0
+    x, y, = cuda.grid(2)
+    thread_id = y * height + x
+    if x >= width or y >= height:
+        return
 
+    
+    aspect_ratio = width / height
+    
 
-    # Normalize direction
     ray_dir = cuda.local.array(3, dtype=np.float32)
-    normalize_vec3(ray_world[:3], ray_dir)
+    ray_origin = cuda.local.array(3, dtype=np.float32)
+
+
+    out_color = cuda.local.array(3, dtype=np.float32)
+    out_color[0] = 0.0
+    out_color[1] = 0.0
+    out_color[2] = 0.0
+
+
+    # Hit data:
+    # [0] - position
+    # [1] - normal
+    # [2] - [0] distance, roughness[1], metallic[2]
+    # [3] - albedo
+    # [4] - emission
+    for i in range(num_samples):
+        pixel_offset_x = xoroshiro128p_uniform_float32(rng_states, thread_id)
+        pixel_offset_y = xoroshiro128p_uniform_float32(rng_states, thread_id)
+
+        ndc_x = ((x + pixel_offset_x) / width) * 2.0 - 1.0
+        ndc_y = ((y + pixel_offset_y) / height) * 2.0 - 1.0
+        ndc_y *= -1.0
+
+        
+        # # Normalize direction
+        generate_camera_rays(ndc_x, ndc_y, inv_view_proj, camPos, ray_dir)
+        
+        for i in range(3):
+            ray_origin[i] = camPos[i]
+
+        ray_energy = cuda.local.array(3, dtype=np.float32)
+        ray_energy[0] = 1.0
+        ray_energy[1] = 1.0
+        ray_energy[2] = 1.0
+
+
+        temp = cuda.local.array(3, dtype=np.float32)
+        hit_data = cuda.local.array(shape=(5, 3), dtype=np.float32)
+        for j in range(5):
+            for k in range(3):
+                hit_data[j, k] = 0.0
+
+        num_bounces = 2
+        for i in range(num_bounces):
+
+          
+            hit_data[2, 0] = math.inf
+            hit_data[2, 1] = math.inf
+            hit_data[2, 2] = math.inf
+
+
+            IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, hit_data)
+
+            Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
+
+            out_color[0] += ray_energy[0] * temp[0]        
+            out_color[1] += ray_energy[1] * temp[1]        
+            out_color[2] += ray_energy[2] * temp[2]        
+
+
+
+            # Test
+            # if hit_data[2, 0] > 0.0 and hit_data[2, 0] < math.inf:
+            #     for i in range(3):
+            #         out_color[i] += hit_data[1, i] * 0.5 + 0.5
+            # else:
+            #     for i in range(3):
+            #         out_color[i] += 0.0
+                
+
+
+    out_color[0] /= float(num_samples)
+    out_color[1] /= float(num_samples)
+    out_color[2] /= float(num_samples)
+
     
-    sphere_center = sphere[:3]
-    sphere_rad = sphere[3]
+    
+    Float3ToRGB(output[y, x, :3], out_color)
 
-    ray_origin = camPos
-    t = -1.0
-    t = ray_sphere_intersect(ray_origin, ray_dir, sphere_center, sphere_rad)
-
-
-
-    temp = cuda.local.array(3, dtype=np.float32)
-    # temp[0] = x / width
-    # temp[1] = y / height
-    # temp[2] = 0.0
-
-    temp[0] = ray_dir[0]
-    temp[1] = ray_dir[1]
-    temp[2] = ray_dir[2]
-
-    if t != -1.0:
-        temp[0] = 1.0
-        temp[1] = 1.0
-        temp[2] = 1.0
-
-
-
-    rgbOut = cuda.local.array(3, dtype=np.uint8)
-    Float3ToRGB(rgbOut, temp)
-
-    for i in range(3):
-        output[y, x, i] = rgbOut[i]
 
 
 class Renderer:
     def __init__(self):
-        pass
+        CoreLogInfo("Initializing Renderer...")
+        if cuda.is_available():
+            try:
+                gpus = list(cuda.gpus)
+                CoreLogInfo(f"Cuda is available. {len(gpus)} devices found:")
+                for i, gpu in enumerate(gpus):
+                    CoreLogInfo(f"  [{i}] {gpu.name}")
+
+            except CudaSupportError as e:
+                CoreLogError(f"  Cuda Support error: {str(e)}")
+        else:
+            CoreLogError(f"Cuda is not available on this machine")
+            CoreLogError("Exiting...")
+            sys.exit(1)
 
 
-    def Render(self, scene : Scene, film : Film):
+
+    def Render(self, scene : Scene, film : Film, num_samples : int = 128):
         # Allocate output array on host and device
         output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
         output_device = cuda.to_device(output_host)
@@ -116,28 +377,54 @@ class Renderer:
         grid_size = ((film.width + block_size[0] - 1) // block_size[0],
                     (film.height + block_size[1] - 1) // block_size[1])
 
+        # Random Number Generation
+        num_threads = block_size[0] * grid_size[0] * block_size[1] * grid_size[1]
+        seed = int(datetime.now().timestamp())
+        rng_states = create_xoroshiro128p_states(num_threads, seed)
+
         # Launch kernel
-       
         camera = scene.camera
-        cudaCamPos = cuda.to_device(camera.position)
-        cudaViewProj = cuda.to_device(camera.viewProjection)
-        cudaInvViewProj = cuda.to_device(np.linalg.inv(camera.viewProjection))
+        cuda_cam_pos = cuda.to_device(camera.position)
+        cuda_view_proj = cuda.to_device(camera.view_projection)
+        cuda_inv_view_proj = cuda.to_device(np.linalg.inv(camera.view_projection))
 
 
-        numSphere = len(scene.spheres)
-        # spherePos = np.array([])
+        numSpheres = len(scene.spheres)
+        sphere_positions = np.array([sphere.position for sphere in scene.spheres])
+        sphere_radius = np.array([sphere.radius for sphere in scene.spheres])
+        sphere_materials = np.array([sphere.material_id for sphere in scene.spheres])
+        cuda_sphere_positions = cuda.to_device(sphere_positions)
+        cuda_sphere_radius = cuda.to_device(sphere_radius)
+        cuda_sphere_material_indices = cuda.to_device(sphere_materials)
 
-        # Position Rad
-        # sphere_arr = np.array([0.0, 0.0, 20.0, 1.0], dtype=np.float32)
-        # cudaSphere = cuda.to_device(sphere_arr)
+        num_planes = len(scene.planes)
+        plane_normal = np.array([plane.normal for plane in scene.planes])
+        plane_distance = np.array([plane.distance for plane in scene.planes])
+        plane_material_indices = np.array([plane.material_id for plane in scene.planes])
 
-        # spherePos = np.array([sphere.position for sphere in scene.spheres])
-        # sphereRad = np.array([sphere.radius for sphere in scene.spheres])
-        # cudaSpherePos = cuda.to_device(spherePos)
-        # cudaSphereRad = cuda.to_device(sphereRad)
-        # cudaOutData = cuda.to_device(film.data)
-        
-        Trace[grid_size, block_size](output_device, film.width, film.height, cudaSphere, cudaCamPos, cudaViewProj, cudaInvViewProj)
+        cuda_plane_normal = cuda.to_device(plane_normal)
+        cuda_plane_distance = cuda.to_device(plane_distance)
+        cuda_plane_material_indices = cuda.to_device(plane_material_indices)
+
+        num_materials = len(scene.materials)
+        materials = np.zeros((num_materials, 3, 3), dtype=np.float32)
+        for i in range(num_materials):
+            for j in range(3):
+                materials[i, 0, j] = scene.materials[i].albedo[j]
+                materials[i, 1, j] = scene.materials[i].emission[j]
+            materials[i, 2, 0] = scene.materials[i].roughness
+            materials[i, 2, 1] = scene.materials[i].metallic
+            
+
+        cuda_materials = cuda.to_device(materials)
+
+
+        Trace[grid_size, block_size](output_device, film.width, film.height, 
+            cuda_sphere_positions, cuda_sphere_radius, cuda_sphere_material_indices, numSpheres,
+            cuda_plane_normal, cuda_plane_distance, cuda_plane_material_indices, num_planes,
+            cuda_materials,
+            cuda_cam_pos, cuda_view_proj, cuda_inv_view_proj, num_samples,
+            rng_states)
 
         # Copy result back to host and save as image
         output_host = output_device.copy_to_host()
