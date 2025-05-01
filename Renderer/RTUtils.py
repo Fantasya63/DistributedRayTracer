@@ -143,6 +143,7 @@ def sample_hemisphere(normal, alpha, rng_states, thread_id, output):
     mat3x3_vec4_multiply(tangent_matrix, tangent_space_dir, output)
 
 
+
 @cuda.jit(device=True)
 def smoothness_to_phong_alpha(s):
     return pow(1000.0, s * s)
@@ -154,6 +155,10 @@ def vec3_reflect(incident, normal, result):
     """
     Reflect vector Incident around normal Normal, result = I - 2 * dot(I, N) * N
     """
+    # for i in range(3):
+    #     incident[i] *= -1.0
+    vec3_normalize(incident, incident)
+    vec3_normalize(normal, normal)
     dot_IN = vec3_dot(incident, normal)
     for i in range(3):
         result[i] = incident[i] - 2.0 * dot_IN * normal[i]

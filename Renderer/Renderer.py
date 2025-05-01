@@ -188,6 +188,48 @@ def IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_m
         ray_plane_intersect(ray_origin, ray_dir, _plane_normal, _plane_dist, i, plane_material_indices, materials, hit_data)
 
 
+@cuda.jit(device=True)
+def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, output):
+    distance = hit_data[2, 0]
+
+    light_dir = cuda.local.array(3, dtype=np.float32)
+    light_dir[0] = 1.0
+    light_dir[1] = 1.0
+    light_dir[2] = -1.0
+    vec3_normalize(light_dir, light_dir)
+
+    if distance < math.inf:
+        hit_specular = 1.0 - hit_data[2, 1]
+        hit_pos = hit_data[0]
+        hit_normal = hit_data[1, :3]
+        hit_color = hit_data[3, :3]
+        hit_emission = hit_data[4]
+
+        ray_origin[0] = hit_pos[0] + (hit_normal[0] * 0.001)
+        ray_origin[1] = hit_pos[1] + (hit_normal[1] * 0.001)
+        ray_origin[2] = hit_pos[2] + (hit_normal[2] * 0.001)
+
+        diff = cuda.local.array(3, dtype=np.float32)
+        l_dot_n = vec3_dot(hit_normal, light_dir)
+
+        for i in range(3):
+            diff[i] = max(0.0, l_dot_n)
+
+        # ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
+        # vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
+        # vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
+
+        for i in range(3):
+            ray_energy[i] *= diff[i]
+        
+        # output[0] = hit_emission[0]
+        # output[1] = hit_emission[1]
+        # output[2] = hit_emission[2]
+        
+    else:
+        for i in range(3):
+            output[i] = 1.0
+
 
 @cuda.jit(device=True)
 def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, output):
@@ -255,7 +297,7 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, outp
         output[2] = 0.5
 
 @cuda.jit
-def Trace(output, width, height, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, camPos, viewProj, inv_view_proj, num_samples, rng_states):
+def Trace(output, width, height, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, camPos, viewProj, inv_view_proj, num_samples, num_bounces, rng_states):
     
     x, y, = cuda.grid(2)
     thread_id = y * height + x
@@ -309,7 +351,6 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
             for k in range(3):
                 hit_data[j, k] = 0.0
 
-        num_bounces = 2
         for i in range(num_bounces):
 
           
@@ -320,7 +361,8 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
 
             IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, hit_data)
 
-            Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
+            # Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
+            Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
 
             out_color[0] += ray_energy[0] * temp[0]        
             out_color[1] += ray_energy[1] * temp[1]        
@@ -367,7 +409,7 @@ class Renderer:
 
 
 
-    def Render(self, scene : Scene, film : Film, num_samples : int = 128):
+    def Render(self, scene : Scene, film : Film, num_samples : int = 128, num_bounces : int = 3):
         # Allocate output array on host and device
         output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
         output_device = cuda.to_device(output_host)
@@ -423,7 +465,7 @@ class Renderer:
             cuda_sphere_positions, cuda_sphere_radius, cuda_sphere_material_indices, numSpheres,
             cuda_plane_normal, cuda_plane_distance, cuda_plane_material_indices, num_planes,
             cuda_materials,
-            cuda_cam_pos, cuda_view_proj, cuda_inv_view_proj, num_samples,
+            cuda_cam_pos, cuda_view_proj, cuda_inv_view_proj, num_samples, num_bounces,
             rng_states)
 
         # Copy result back to host and save as image

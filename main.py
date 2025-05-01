@@ -28,7 +28,7 @@ def main():
     LogInfo(f"UP     : {rot_matrix @ np.array([0.0, 1.0, 0.0], dtype=np.float32)}")
 
     renderer = Renderer()
-    renderer.Render(scene, film, 32)
+    renderer.Render(scene, film, 32, 3)
 
 
 
