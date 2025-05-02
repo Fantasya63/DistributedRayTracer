@@ -1,19 +1,25 @@
 {Scene: Scene, Film: {Width: 1920, Height: 1080}, Camera: {Position: [2.84128475189209,
       1.2509679794311523, -4.674535751342773], Rotation: [1.5428715944290161, 0.27925267815589905,
       -1.3901393813853247e-08], FOV: 0.6911112070083618, NearPlane: 0.10000000149011612,
-    FarPlane: 1000.0}, Entities: [{EntityID: 8799545723924288714, TagComponent: {
+    FarPlane: 1000.0}, Entities: [{EntityID: 17186939109071891521, TagComponent: {
         Tag: RT_Sphere}, TransformComponent: {Position: [0.0, 1.0, 2.0], Rotation: [
           0.0, 0.0, 0.0], Scale: [1.0, 1.0, 1.0]}, MaterialID: 0, SphereComponent: {
-        Radius: 1.0}}, {EntityID: 13788575546631417914, TagComponent: {Tag: RT_Sphere.001},
+        Radius: 1.0}}, {EntityID: 15359541382123125231, TagComponent: {Tag: RT_Sphere.001},
       TransformComponent: {Position: [1.7787551879882812, 1.029152512550354, 5.676741600036621],
         Rotation: [0.0, 0.0, 0.0], Scale: [1.0, 1.0, 1.0]}, MaterialID: 1, SphereComponent: {
-        Radius: 1.0}}, {EntityID: 11707418731902108548, TagComponent: {Tag: RT_Inf_Plane},
+        Radius: 1.0}}, {EntityID: 7601163475217943444, TagComponent: {Tag: RT_Inf_Plane},
       TransformComponent: {Position: [0.0, 0.0, 0.0], Rotation: [0.0, 0.0, 0.0], Scale: [
-          1.0, 1.0, 1.0]}, MaterialID: 2, PlaneComponent: {}}], Materials: [{Name: Glow,
-      BaseColor: [0.800000011920929, 0.800000011920929, 0.800000011920929], Roughness: 1.0,
-      Metallic: 0.0, EmissionColor: [1.0, 0.3665624260902405, 0.0], EmissionStrength: 1.0},
+          1.0, 1.0, 1.0]}, MaterialID: 2, PlaneComponent: {}}, {EntityID: 5201831991843104587,
+      TagComponent: {Tag: RT_Sphere.002}, TransformComponent: {Position: [1.4462006092071533,
+          0.39577716588974, 2.0778112411499023], Rotation: [0.0, 0.0, 0.0], Scale: [
+          0.3985559940338135, 0.3985559940338135, 0.3985559940338135]}, MaterialID: 3,
+      SphereComponent: {Radius: 0.3985559940338135}}], Materials: [{Name: Glow, BaseColor: [
+        0.800000011920929, 0.800000011920929, 0.800000011920929], Roughness: 0.4000000059604645,
+      Metallic: 0.0, EmissionColor: [1.0, 1.0, 1.0], EmissionStrength: 10.50},
     {Name: Sphere, BaseColor: [0.800000011920929, 0.800000011920929, 0.800000011920929],
-      Roughness: 1.0, Metallic: 0.0, EmissionColor: [0.0, 0.0, 0.0],
-      EmissionStrength: 0.0}, {Name: Ground, BaseColor: [0.800000011920929, 0.0,
-        0.0], Roughness: 1.0, Metallic: 0.0, EmissionColor: [
-        0.0, 0.0, 0.0], EmissionStrength: 0.0}]}
+      Roughness: 0.4000000059604645, Metallic: 0.0, EmissionColor: [0.0, 0.0, 0.0],
+      EmissionStrength: 1.0}, {Name: Ground, BaseColor: [0.800000011920929, 0.800000011920929,
+        0.800000011920929], Roughness: 0.4000000059604645, Metallic: 0.0, EmissionColor: [
+        0.0, 0.0, 0.0], EmissionStrength: 1.0}, {Name: Sphere.001, BaseColor: [0.800000011920929,
+        0.800000011920929, 0.800000011920929], Roughness: 0.4000000059604645, Metallic: 0.0,
+      EmissionColor: [0.0, 0.0, 0.0], EmissionStrength: 1.0}]}

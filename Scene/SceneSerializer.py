@@ -64,7 +64,7 @@ class SceneSerializer:
                 albedo=material_data["BaseColor"],
                 roughness=material_data["Roughness"],
                 metallic=material_data["Metallic"],
-                emission= glm.vec3(material_data["EmissionColor"]) * glm.vec3(material_data["EmissionStrength"]))
+                emission= glm.pow(material_data["EmissionColor"], glm.vec3(2.2)) * glm.vec3(material_data["EmissionStrength"]))
             
             scene.materials.append(material)
         scene.materials = np.array(scene.materials)

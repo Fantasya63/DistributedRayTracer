@@ -17,7 +17,7 @@ from Renderer.Film import Film
 from Renderer.RTUtils import *
 from Log.Logger import *
 from numba.cuda.cudadrv.error import CudaSupportError
-
+from Renderer.ImageLoader import *
 
 @cuda.jit(device=True)
 def ray_sphere_intersect(ray_origin, ray_dir, sphere_pos, sphere_radius, sphere_index, sphere_material_indices, materials, best_hit):
@@ -36,8 +36,9 @@ def ray_sphere_intersect(ray_origin, ray_dir, sphere_pos, sphere_radius, sphere_
         return
 
     t = (-b - math.sqrt(discriminant)) / (2.0 * a)
-
-    if t > 0.0 and t < best_hit[2, 0]:
+    
+    best_distance = best_hit[2, 0]
+    if t > 0.0 and t < best_distance:
         # Position
         pos = cuda.local.array(3, dtype=np.float32)
         pos[0] = ray_origin[0] + t * ray_dir[0]
@@ -100,7 +101,8 @@ def ray_plane_intersect(ray_origin, ray_dir, plane_normal, plane_dist, plane_ind
         return
 
 
-    if t > 0.0 and t < best_hit[2, 0]:
+    best_distance = best_hit[2, 0]
+    if t > 0.0 and t < best_distance:
         # Position
         pos = cuda.local.array(3, dtype=np.float32)
         pos[0] = ray_dir[0] * t
@@ -189,7 +191,7 @@ def IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_m
 
 
 @cuda.jit(device=True)
-def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, output):
+def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, sky_hdr, sky_width, sky_height, rng_states, thread_id, output):
     distance = hit_data[2, 0]
 
     light_dir = cuda.local.array(3, dtype=np.float32)
@@ -199,7 +201,13 @@ def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id,
     vec3_normalize(light_dir, light_dir)
 
     if distance < math.inf:
-        hit_specular = 1.0 - hit_data[2, 1]
+        # hit_specular = 1.0 - hit_data[2, 1]
+        
+        hit_specular = cuda.local.array(3, dtype=np.float32)
+        for i in range(3):
+            hit_specular[i] = 0.6
+
+
         hit_pos = hit_data[0]
         hit_normal = hit_data[1, :3]
         hit_color = hit_data[3, :3]
@@ -213,14 +221,15 @@ def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id,
         l_dot_n = vec3_dot(hit_normal, light_dir)
 
         for i in range(3):
-            diff[i] = max(0.0, l_dot_n)
+            diff[i] = max(0.0, l_dot_n) * hit_color[i]
 
-        # ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
-        # vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
-        # vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
+        ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
+        vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
+        vec3_normalize(ray_dir_ref_hit_norm, ray_dir)
+
 
         for i in range(3):
-            ray_energy[i] *= diff[i]
+            ray_energy[i] *= hit_specular[i]
         
         # output[0] = hit_emission[0]
         # output[1] = hit_emission[1]
@@ -228,11 +237,13 @@ def Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id,
         
     else:
         for i in range(3):
-            output[i] = 1.0
+            ray_energy[i] = 0.0
 
+        sample_hdr(ray_dir, sky_hdr, sky_width, sky_height, output)
+        
 
 @cuda.jit(device=True)
-def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, output):
+def Shade(ray_origin, ray_dir, ray_energy, hit_data, sky_hdr, sky_width, sky_height, rng_states, thread_id, output):
     # Hit data:
     # [0] - position
     # [1] - normal
@@ -243,28 +254,36 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, outp
 
     distance = hit_data[2, 0]
     if distance < math.inf:
-        hit_specular = 1.0 - hit_data[2, 1]
+        hit_smoothness = 1.0 - hit_data[2, 1]
+        hit_specular = 0.04
         hit_pos = hit_data[0]
         hit_normal = hit_data[1, :3]
-        hit_color = hit_data[3, :3]
+        
+        hit_color = cuda.local.array(3, np.float32)
+
         for i in range(3):
-            hit_color[i] = min(1.0 - hit_specular, hit_color[i])
+            hit_color[i] = min(1.0 - hit_specular, hit_data[3, i])
         
         spec_chance = hit_specular
         diff_chance = energy(hit_color)
-        
+
         ray_origin[0] = hit_pos[0] + hit_normal[0] * 0.001
         ray_origin[1] = hit_pos[1] + hit_normal[1] * 0.001
         ray_origin[2] = hit_pos[2] + hit_normal[2] * 0.001
 
         roulette = xoroshiro128p_uniform_float32(rng_states, thread_id)
         if roulette < spec_chance:
+            ray_origin[0] = hit_pos[0] + hit_normal[0] * 0.001
+            ray_origin[1] = hit_pos[1] + hit_normal[1] * 0.001
+            ray_origin[2] = hit_pos[2] + hit_normal[2] * 0.001
+
+
             # Specular reflection
-            alpha = smoothness_to_phong_alpha(hit_specular)
+            alpha = smoothness_to_phong_alpha(hit_smoothness)
             
             ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
             vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
-            vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
+            # vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
             sample_hemisphere(ray_dir_ref_hit_norm, alpha, rng_states, thread_id, ray_dir)
             vec3_normalize(ray_dir, ray_dir)
 
@@ -275,7 +294,12 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, outp
         
         elif diff_chance > 0.0 and roulette < spec_chance + diff_chance:
             # Diffuse reflection
+            ray_origin[0] = hit_pos[0] + hit_normal[0] * 0.001
+            ray_origin[1] = hit_pos[1] + hit_normal[1] * 0.001
+            ray_origin[2] = hit_pos[2] + hit_normal[2] * 0.001
+
             sample_hemisphere(hit_normal, 1.0, rng_states, thread_id, ray_dir)
+            vec3_normalize(ray_dir, ray_dir)
 
             for i in range(3):
                 ray_energy[i] *= (1.0 / diff_chance) * hit_color[i]
@@ -290,14 +314,18 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, outp
         output[1] = hit_emission[1]
         output[2] = hit_emission[2]
     else:
-        # Sky
-        # Erase the ray's energy - the sky doen't reflect anything
-        output[0] = 0.5
-        output[1] = 0.5
-        output[2] = 0.5
+        for i in range(3):
+            ray_energy[i] = 0.0
+            output[i] = 0.0
+        
+        sample_hdr(ray_dir, sky_hdr, sky_width, sky_height, output)
 
 @cuda.jit
-def Trace(output, width, height, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, camPos, viewProj, inv_view_proj, num_samples, num_bounces, rng_states):
+def Trace(output, width, height, sphere_position, sphere_radius, sphere_material_indices, num_spheres, 
+    plane_normal, plane_dist, plane_material_indices, num_planes,
+    materials, camPos, viewProj, inv_view_proj, num_samples, num_bounces,
+    sky_hdr, sky_width, sky_height,
+    rng_states):
     
     x, y, = cuda.grid(2)
     thread_id = y * height + x
@@ -345,7 +373,7 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
         ray_energy[2] = 1.0
 
 
-        temp = cuda.local.array(3, dtype=np.float32)
+        
         hit_data = cuda.local.array(shape=(5, 3), dtype=np.float32)
         for j in range(5):
             for k in range(3):
@@ -361,12 +389,18 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
 
             IntersectScene(ray_origin, ray_dir, sphere_position, sphere_radius, sphere_material_indices, num_spheres, plane_normal, plane_dist, plane_material_indices, num_planes, materials, hit_data)
 
-            # Shade(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
-            Shade_Test(ray_origin, ray_dir, ray_energy, hit_data, rng_states, thread_id, temp)
+            temp = cuda.local.array(3, dtype=np.float32)
+            
+            curr_energy = cuda.local.array(3, dtype=np.float32)
+            for i in range(3):
+                curr_energy[i] = ray_energy[i]
 
-            out_color[0] += ray_energy[0] * temp[0]        
-            out_color[1] += ray_energy[1] * temp[1]        
-            out_color[2] += ray_energy[2] * temp[2]        
+            Shade(ray_origin, ray_dir, ray_energy, hit_data, sky_hdr, sky_width, sky_height, rng_states, thread_id, temp)
+            
+           
+            out_color[0] += curr_energy[0] * temp[0]        
+            out_color[1] += curr_energy[1] * temp[1]        
+            out_color[2] += curr_energy[2] * temp[2]        
 
 
 
@@ -377,7 +411,10 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
             # else:
             #     for i in range(3):
             #         out_color[i] += 0.0
-                
+        
+            # TODO: Remove this after testing
+            # if (vec3_dot(ray_energy, ray_energy) < 0.001):
+            #     break
 
 
     out_color[0] /= float(num_samples)
@@ -385,7 +422,7 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
     out_color[2] /= float(num_samples)
 
     
-    
+    filmic_tonemap(out_color, out_color)
     Float3ToRGB(output[y, x, :3], out_color)
 
 
@@ -409,7 +446,7 @@ class Renderer:
 
 
 
-    def Render(self, scene : Scene, film : Film, num_samples : int = 128, num_bounces : int = 3):
+    def Render(self, scene : Scene, film : Film, num_samples : int = 128, num_bounces : int = 16):
         # Allocate output array on host and device
         output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
         output_device = cuda.to_device(output_host)
@@ -459,6 +496,7 @@ class Renderer:
             
 
         cuda_materials = cuda.to_device(materials)
+        cuda_hdr, hdr_width, hdr_height = load_hdr_to_device("TestData/sky.hdr")
 
 
         Trace[grid_size, block_size](output_device, film.width, film.height, 
@@ -466,6 +504,7 @@ class Renderer:
             cuda_plane_normal, cuda_plane_distance, cuda_plane_material_indices, num_planes,
             cuda_materials,
             cuda_cam_pos, cuda_view_proj, cuda_inv_view_proj, num_samples, num_bounces,
+            cuda_hdr, hdr_width, hdr_height,
             rng_states)
 
         # Copy result back to host and save as image

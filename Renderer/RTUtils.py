@@ -34,8 +34,8 @@ def vec3_dot(a, b):
 def vec3_cross(a, b, result):
     """ calculates the cross product of A x B and returns the result in result arr """
     result[0] = (a[1] * b[2]) - (a[2] * b[1])
-    result[1] = (a[2] * b[0]) - (a[1] * b[2])
-    result[2] = (a[0] * b[1]) - (a[2] * b[0])
+    result[1] = (a[2] * b[0]) - (a[0] * b[2])
+    result[2] = (a[0] * b[1]) - (a[1] * b[0])
 
 
 @cuda.jit(device=True)
@@ -92,6 +92,62 @@ def Float3ToRGB(output, _input):
 
         output[i] = int(temp * 255)
 
+@cuda.jit(device=True)
+def reinhard_tonemap(input, output):
+    """
+    Applies Reinhard tonemapping to a vec3 color.
+    
+    Parameters:
+        input_color: float32[3] - Input HDR color
+        output_color: float32[3] - Output LDR color
+    """
+    output[0] = input[0] / (1.0 + input[0])
+    output[1] = input[1] / (1.0 + input[1])
+    output[2] = input[2] / (1.0 + input[2])
+
+
+@cuda.jit(device=True)
+def filmic_tonemap(input_color, output_color):
+    """
+    Approximates Blender's Filmic tonemapping using Hable's curve.
+    
+    Parameters:
+        input_color: float32[3] - HDR input color
+        output_color: float32[3] - LDR output color
+    """
+    for i in range(3):
+        x = input_color[i]
+        
+        # Hable tonemapping parameters
+        A = 0.22
+        B = 0.30
+        C = 0.10
+        D = 0.20
+        E = 0.01
+        F = 0.30
+        
+        # Hable curve
+        tonemapped = ((x*(A*x+C*B)+D*E) / (x*(A*x+B)+D*F)) - E/F
+
+        # Normalize to [0,1]
+        output_color[i] = max(0.0, min(tonemapped, 1.0))
+
+
+
+@cuda.jit(device=True)
+def aces_tonemap(input, output):
+    # RRT and ODT fit approximation (ACES filmic curve)
+    a = 2.51
+    b = 0.03
+    c = 2.43
+    d = 0.59
+    e = 0.14
+
+    for i in range(3):  # process R, G, B channels
+        x = input[i]
+        tonemapped = (x * (a * x + b)) / (x * (c * x + d) + e)
+        output[i] = min(max(tonemapped, 0.0), 1.0)
+
 
 @cuda.jit(device=True)
 def get_tangent_space_matrix(normal, output):
@@ -113,11 +169,11 @@ def get_tangent_space_matrix(normal, output):
     temp = cuda.local.array(3, dtype=np.float32)
    
     # Tangent = norm(Normal x helper)
-    vec3_cross(normal, helper, temp)
+    vec3_cross(helper, normal, temp)
     vec3_normalize(temp, tangent)
 
     # Binormal = norm(Normal x Tangent)
-    vec3_cross(normal, tangent, temp)
+    vec3_cross(tangent, normal, temp)
     vec3_normalize(temp, binormal)
     
     for i in range(3):
@@ -155,13 +211,9 @@ def vec3_reflect(incident, normal, result):
     """
     Reflect vector Incident around normal Normal, result = I - 2 * dot(I, N) * N
     """
-    # for i in range(3):
-    #     incident[i] *= -1.0
-    vec3_normalize(incident, incident)
-    vec3_normalize(normal, normal)
     dot_IN = vec3_dot(incident, normal)
     for i in range(3):
-        result[i] = incident[i] - 2.0 * dot_IN * normal[i]
+        result[i] = incident[i] - ((2.0 * dot_IN) * normal[i])
 
 
 
@@ -170,3 +222,22 @@ def sdot_fast(x, y, f=1.0):
     d = vec3_dot(x, y) * f
     d = 0.5 * (d + abs(d))  # remove negative values (clamp at 0)
     return min(d, 1.0)      # clamp upper at 1
+
+
+@cuda.jit(device=True)
+def sample_hdr(ray_dir, hdr_image, width, height, output):
+    x, y, z = ray_dir[0], ray_dir[1], ray_dir[2]
+    
+    # len_inv = 1.0 / math.sqrt(x*x, y*y, z*z)
+
+    # Convert to UV coordinates using equirectangular projection
+    u = (math.atan2(x, -z) / (2.0 * math.pi)) + 0.5
+    v = math.acos(y) / math.pi
+
+    # Convert UV to pixel coordinates
+    px = int(u * width) % width
+    py = int(v * height) % height
+
+    output[0] = hdr_image[py, px, 0]
+    output[1] = hdr_image[py, px, 1]
+    output[2] = hdr_image[py, px, 2]
