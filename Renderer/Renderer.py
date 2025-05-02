@@ -10,8 +10,6 @@ from numba.cuda.random import (
     create_xoroshiro128p_states,
     xoroshiro128p_uniform_float32
 )
-import time
-
 
 from Scene.Scene import Scene
 from Renderer.Film import Film
@@ -501,7 +499,11 @@ class Renderer:
 
 
         # Time the render
-        start = timer
+        start = cuda.event()
+        end = cuda.event()
+
+
+        start.record()
 
         Trace[grid_size, block_size](output_device, film.width, film.height, 
             cuda_sphere_positions, cuda_sphere_radius, cuda_sphere_material_indices, numSpheres,
@@ -511,9 +513,13 @@ class Renderer:
             cuda_hdr, hdr_width, hdr_height,
             rng_states)
 
-        # 
+        end.record()
+        end.synchronize()
+        elapsed_time = cuda.event_elapsed_time(start, end)
+
 
         # Copy result back to host and save as image
         output_host = output_device.copy_to_host()
+        LogInfo(f"Render finished with total time of {elapsed_time * 0.001 : 0.4f} seconds")
         image = Image.fromarray(output_host)
         image.save('gradient.png')
