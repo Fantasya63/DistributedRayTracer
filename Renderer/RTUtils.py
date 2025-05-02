@@ -201,6 +201,49 @@ def sample_hemisphere(normal, alpha, rng_states, thread_id, output):
 
 
 @cuda.jit(device=True)
+def sample_hemisphere_test(normal, alpha, rng_states, thread_id, output):
+    rand1 = xoroshiro128p_uniform_float32(rng_states, thread_id)
+    rand2 = xoroshiro128p_uniform_float32(rng_states, thread_id)
+
+    phi = 2.0 * math.pi * rand1
+    cos_theta = math.pow(1.0 - rand2, 1.0 / (alpha + 1.0))
+    sin_theta = math.sqrt(1.0 - cos_theta * cos_theta)
+
+    # Sample direction in tangent space
+    x = sin_theta * math.cos(phi)
+    y = sin_theta * math.sin(phi)
+    z = cos_theta
+
+    up = cuda.local.array(3, dtype=np.float32)
+    tangent = cuda.local.array(3, dtype=np.float32)
+    bitangent = cuda.local.array(3, dtype=np.float32)
+    for i in range(3):
+        tangent[i] = 0.0
+        bitangent[i] = 0.0
+
+    if math.fabs(normal[2]) < 0.999:
+        up[0] = 0.0
+        up[1] = 0.0
+        up[2] = 1.0
+    
+    else:
+        up[0] = 1.0
+        up[1] = 0.0
+        up[2] = 0.0
+    
+    vec3_cross(up, normal, tangent)
+    vec3_normalize(tangent, tangent)
+    vec3_cross(normal, tangent, bitangent)
+
+    # Transform to world space
+    output[0] = x * tangent[0] + y * bitangent[0] + z * normal[0]
+    output[1] = x * tangent[1] + y * bitangent[1] + z * normal[1]
+    output[2] = x * tangent[2] + y * bitangent[2] + z * normal[2]
+    vec3_normalize(output, output)
+
+
+
+@cuda.jit(device=True)
 def smoothness_to_phong_alpha(s):
     return pow(1000.0, s * s)
 

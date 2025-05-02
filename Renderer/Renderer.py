@@ -10,6 +10,7 @@ from numba.cuda.random import (
     create_xoroshiro128p_states,
     xoroshiro128p_uniform_float32
 )
+import time
 
 
 from Scene.Scene import Scene
@@ -284,7 +285,7 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, sky_hdr, sky_width, sky_hei
             ray_dir_ref_hit_norm = cuda.local.array(3, dtype=np.float32)
             vec3_reflect(ray_dir, hit_normal, ray_dir_ref_hit_norm)
             # vec3_normalize(ray_dir_ref_hit_norm, ray_dir_ref_hit_norm)
-            sample_hemisphere(ray_dir_ref_hit_norm, alpha, rng_states, thread_id, ray_dir)
+            sample_hemisphere_test(ray_dir_ref_hit_norm, alpha, rng_states, thread_id, ray_dir)
             vec3_normalize(ray_dir, ray_dir)
 
             f = (alpha + 2) / (alpha + 1)
@@ -298,7 +299,7 @@ def Shade(ray_origin, ray_dir, ray_energy, hit_data, sky_hdr, sky_width, sky_hei
             ray_origin[1] = hit_pos[1] + hit_normal[1] * 0.001
             ray_origin[2] = hit_pos[2] + hit_normal[2] * 0.001
 
-            sample_hemisphere(hit_normal, 1.0, rng_states, thread_id, ray_dir)
+            sample_hemisphere_test(hit_normal, 1.0, rng_states, thread_id, ray_dir)
             vec3_normalize(ray_dir, ray_dir)
 
             for i in range(3):
@@ -499,6 +500,9 @@ class Renderer:
         cuda_hdr, hdr_width, hdr_height = load_hdr_to_device("TestData/sky.hdr")
 
 
+        # Time the render
+        start = timer
+
         Trace[grid_size, block_size](output_device, film.width, film.height, 
             cuda_sphere_positions, cuda_sphere_radius, cuda_sphere_material_indices, numSpheres,
             cuda_plane_normal, cuda_plane_distance, cuda_plane_material_indices, num_planes,
@@ -506,6 +510,8 @@ class Renderer:
             cuda_cam_pos, cuda_view_proj, cuda_inv_view_proj, num_samples, num_bounces,
             cuda_hdr, hdr_width, hdr_height,
             rng_states)
+
+        # 
 
         # Copy result back to host and save as image
         output_host = output_device.copy_to_host()
