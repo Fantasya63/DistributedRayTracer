@@ -1,36 +1,38 @@
-
-from Renderer.Renderer import Renderer
-from Renderer.Film import Film
-from Renderer.Camera import Camera
-from Scene.Scene import Scene
-from Scene.SceneSerializer import SceneSerializer
-from Scene.RTPrimitives import Sphere
+from Application.Application import Application
+from Application.Client import ClientApp
+from Application.Server import ServerApp
+from ExitCode import ExitCode
 from Log.Logger import *
+from Log.UserInput import *
 
-import numpy as np
-import math
+import sys
 
 def main():
-    # Image dimensions
-    film : Film = Film(width=1920, height=1080)
+    CoreLogInfo("Distributed Offline Ray Tracing of CG Scenes")
+    CoreLogInfo("A Final Project for CMPSC-160")
+    user_input = GetChar("Configure this machine as: s - Server, c - Client? : ")
 
-        
-    scene : Scene = Scene()
-    serializer : SceneSerializer = SceneSerializer(scene)
-    serializer.DeserializeSceneRuntime("TestData/TestScene.cdscn")
 
-    # scene.camera.set_rotation([0.0, 90.0, 0.0])
-    scene.camera.set_FOV(90.0)
+    app : Application = None
+    if user_input == 's':
+        # Server
+        app = ServerApp()
 
-    rot_matrix = scene.camera.get_rot_matrix()
-    LogInfo("Camera Details:")
-    LogInfo(f"Forward: {rot_matrix @ np.array([0.0, 0.0, 1.0], dtype=np.float32) }")
-    LogInfo(f"Right  : {rot_matrix @ np.array([1.0, 0.0, 0.0], dtype=np.float32)}")
-    LogInfo(f"UP     : {rot_matrix @ np.array([0.0, 1.0, 0.0], dtype=np.float32)}")
+    elif user_input == 'c':
+        # Client
+        app = ClientApp()
 
-    renderer = Renderer()
-    renderer.Render(scene, film, 256, 8)
+    else:
+        # Tell the user what happened
+        LogError("Invalid user input detected.")
+        LogError("Exiting the program...")
+    
+        # Exit the program
+        sys.exit(ExitCode.INVALID_INPUT)
 
+
+    # Run the application
+    app.run()
 
 
 if __name__ == "__main__":

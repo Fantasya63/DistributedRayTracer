@@ -1,0 +1,180 @@
+import struct
+import socket
+from enum import Enum
+from Log.Logger import *
+from ExitCode import *
+from Renderer.Renderer import Renderer
+from Scene.Scene import Scene
+from Scene.SceneSerializer import SceneSerializer
+from Renderer.Film import Film
+
+
+MAX_PACKET_SIZE = 4096
+
+def GetLocalIP():
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(('8.8.8.8', 80))
+        return s.getsockname()[0]
+
+
+class CommandHeaders(Enum):
+    DISCONNECT = 0
+    RENDER = 1
+    SCENE_FILE = 2
+
+
+# def SendSceneFile(conn: socket.socket, scene_data : str):
+#     LogInfo("Sending Scene FIle..")
+#     try:
+#         scene_bytes = scene_data.encode('utf-8')
+#         scene_size = len(scene_bytes)
+
+#         # Send Header
+#         header_bytes = struct.pack('B', CommandHeaders.SCENE_FILE.value)
+
+#         # Send the num of bytes the data to send in Big Endian
+#         conn.send(header_bytes)
+
+#         conn.send(struct.pack(">I", scene_size))
+
+#         # # Send the actual data
+#         conn.sendall(scene_bytes)
+
+#         CoreLogInfo(f"Scene file sent! {scene_size} bytes used.")
+#     except Exception as e:
+#         CoreLogError(f"Failed to send scene file: {e}")
+
+
+# def ReceiveSceneFile(conn : socket.socket):
+#     try:
+#         size_data = conn.recv(4)
+#         if len(size_data) < 4:
+#             raise ValueError("Scene size header is incomplete")
+        
+#         size = struct.unpack(">I", size_data)[0]
+
+#         data = b''
+#         while len(data) < size:
+#             # Receive MAX_PACKET_SIZE bytes or the amount remaining bytes if the remaining bytes is lessthan MAX_PACKET_SIZE
+#             chunk = conn.recv(min(MAX_PACKET_SIZE, size - len(data)))
+#             if not chunk:
+#                 raise ConnectionError("Disconnected during scene file receive.")
+            
+#             data += chunk
+#         scene_text = data.decode('utf-8')
+#         CoreLogInfo("Received scene file")
+#         return scene_text
+
+#     except Exception as e:
+#         CoreLogInfo(f"Failed to receive scene file: {e}")
+#         return None
+
+
+def ReceiveCommand(conn : socket.socket):
+    header = conn.recv(1)
+    header = int.from_bytes(header)
+    LogInfo(f"Received Header: {header}")
+    if not header:
+        LogError("No command header received.")
+        return
+    
+
+    if header == CommandHeaders.SCENE_FILE.value:
+        return ReceiveSceneFile(conn)
+    
+    elif header == CommandHeaders.RENDER.value:
+        return ReceiveRenderCommand(conn)
+    
+    else:
+        CoreLogError("Unknown Command Header is received.")
+        CoreLogError("Exiting....")
+        sys.exit(ExitCode.UNKNOWN_COMMAND_HEADER)
+
+
+def SendRenderCommand(conn : socket.socket, scene_data : str, num_sample : int, num_bounces : int):
+    LogInfo("Sending Render Command...")
+    try:
+        # Send Header
+        header_bytes = struct.pack('B', CommandHeaders.SCENE_FILE.value)
+        conn.send(header_bytes)
+
+        # Send the amount of samples and bounces
+        conn.send(struct.pack(">I", num_bounces))
+        conn.send(struct.pack(">I", num_sample))
+
+
+        # Send Scene data
+        scene_bytes = scene_data.encode('utf-8')
+        scene_size = len(scene_bytes)
+
+        conn.send(struct.pack(">I", scene_size))
+
+        # Send the actual data
+        conn.sendall(scene_bytes)
+
+        CoreLogInfo(f"Scene file sent! {scene_size} bytes used.")
+        CoreLogInfo(f"Render Command sent! Num of Bounces: {num_bounces}, Num of samples: {num_sample}")
+    
+    except Exception as e:
+        CoreLogError(f"Failed to send scene file: {e}")
+
+
+def ReceiveRenderCommand(conn : socket.socket):
+    try:
+        num_bounces_data = conn.recv(4)
+        if len(num_bounces_data) < 4:
+            raise ValueError("Num bounces data is incomplete")
+        num_bounces = struct.unpack(">I", num_bounces_data)[0]
+
+
+        num_samples_data = conn.recv(4)
+        if len(num_samples_data) < 4:
+            raise ValueError("Num samples data is incomplete")
+        num_samples = struct.unpack(">I", num_samples_data)[0]
+        
+
+        scene_size_data = conn.recv(4)
+        if len(scene_size_data) < 4:
+            raise ValueError("Scene size data is incomplete")
+        
+
+        #  Receive the scene file
+        size = struct.unpack(">I", scene_size_data)[0]
+        data = b''
+        while len(data) < size:
+            # Receive MAX_PACKET_SIZE bytes or the amount remaining bytes if the remaining bytes is lessthan MAX_PACKET_SIZE
+            chunk = conn.recv(min(MAX_PACKET_SIZE, size - len(data)))
+            if not chunk:
+                raise ConnectionError("Disconnected during scene file receive.")
+            
+            data += chunk
+        scene_text = data.decode('utf-8')
+        CoreLogInfo("Received scene file")
+        
+
+        # Parse Scene Text into Scene Object
+        scene : Scene = Scene()
+        scene_serializer : SceneSerializer = SceneSerializer()
+
+        scene_serializer.DeserializeSceneRuntimeFromString(scene_text)
+
+
+
+
+        # Get the film object from the scene's camera
+        film : Film = scene.camera.film
+        film.num_samples = num_samples
+
+
+        # Init Renderer
+        renderer : Renderer =  Renderer()
+
+        # Render the scene
+        renderer.Render(scene, film, num_samples, num_bounces)
+
+        # Send the Film to the server
+
+
+    except Exception as e:
+        CoreLogInfo(f"Failed to receive scene file: {e}")
+        return None

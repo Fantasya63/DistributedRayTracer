@@ -447,7 +447,9 @@ class Renderer:
 
     def Render(self, scene : Scene, film : Film, num_samples : int = 128, num_bounces : int = 16):
         # Allocate output array on host and device
+        # output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
         output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
+
         output_device = cuda.to_device(output_host)
 
         # Set up grid and block dimensions
