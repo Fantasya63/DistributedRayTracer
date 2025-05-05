@@ -20,8 +20,7 @@ def GetLocalIP():
 class CommandHeaders(Enum):
     DISCONNECT = 0
     RENDER = 1
-    SCENE_FILE = 2
-    FILM = 3
+    FILM = 2
 
 
 def ReceiveCommand(conn : socket.socket):
