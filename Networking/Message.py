@@ -24,53 +24,6 @@ class CommandHeaders(Enum):
     FILM = 3
 
 
-# def SendSceneFile(conn: socket.socket, scene_data : str):
-#     LogInfo("Sending Scene FIle..")
-#     try:
-#         scene_bytes = scene_data.encode('utf-8')
-#         scene_size = len(scene_bytes)
-
-#         # Send Header
-#         header_bytes = struct.pack('B', CommandHeaders.SCENE_FILE.value)
-
-#         # Send the num of bytes the data to send in Big Endian
-#         conn.send(header_bytes)
-
-#         conn.send(struct.pack(">I", scene_size))
-
-#         # # Send the actual data
-#         conn.sendall(scene_bytes)
-
-#         CoreLogInfo(f"Scene file sent! {scene_size} bytes used.")
-#     except Exception as e:
-#         CoreLogError(f"Failed to send scene file: {e}")
-
-
-# def ReceiveSceneFile(conn : socket.socket):
-#     try:
-#         size_data = conn.recv(4)
-#         if len(size_data) < 4:
-#             raise ValueError("Scene size header is incomplete")
-        
-#         size = struct.unpack(">I", size_data)[0]
-
-#         data = b''
-#         while len(data) < size:
-#             # Receive MAX_PACKET_SIZE bytes or the amount remaining bytes if the remaining bytes is lessthan MAX_PACKET_SIZE
-#             chunk = conn.recv(min(MAX_PACKET_SIZE, size - len(data)))
-#             if not chunk:
-#                 raise ConnectionError("Disconnected during scene file receive.")
-            
-#             data += chunk
-#         scene_text = data.decode('utf-8')
-#         CoreLogInfo("Received scene file")
-#         return scene_text
-
-#     except Exception as e:
-#         CoreLogInfo(f"Failed to receive scene file: {e}")
-#         return None
-
-
 def ReceiveCommand(conn : socket.socket):
     header = conn.recv(1)
     header = int.from_bytes(header)
@@ -95,7 +48,7 @@ def SendRenderCommand(conn : socket.socket, scene_data : str, num_sample : int, 
     LogInfo("Sending Render Command...")
     try:
         # Send Header
-        header_bytes = struct.pack('B', CommandHeaders.SCENE_FILE.value)
+        header_bytes = struct.pack('B', CommandHeaders.RENDER.value)
         conn.send(header_bytes)
 
         # Send the amount of samples and bounces
