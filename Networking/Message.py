@@ -35,6 +35,7 @@ def ReceiveCommand(conn : socket.socket):
         return ReceiveRenderCommand(conn)
     
     elif header == CommandHeaders.FILM.value:
+
         return ReceiveFilmCommand(conn)
 
     else:
@@ -125,6 +126,7 @@ def ReceiveRenderCommand(conn : socket.socket):
         renderer.Render(scene, film, num_samples, num_bounces)
 
         # Send the Film to the server
+        SendFilmCommand(conn, film)
 
 
     except Exception as e:
