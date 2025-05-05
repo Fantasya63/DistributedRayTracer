@@ -421,8 +421,9 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
     out_color[2] /= float(num_samples)
 
     
-    filmic_tonemap(out_color, out_color)
-    Float3ToRGB(output[y, x, :3], out_color)
+    # filmic_tonemap(out_color, out_color)
+    # Float3ToRGB(output[y, x, :3], out_color)
+    output[y, x, :3] = out_color
 
 
 
@@ -443,14 +444,58 @@ class Renderer:
             CoreLogError("Exiting...")
             sys.exit(1)
 
+    def aces_tonemap_numpy(color: np.ndarray) -> np.ndarray:
+        a = 2.51
+        b = 0.03
+        c = 2.43
+        d = 0.59
+        e = 0.14
+
+        tonemapped = (color * (a * color + b)) / (color * (c * color + d) + e)
+        return np.clip(tonemapped, 0.0, 1.0)
+
+    def PostProcessFilm(film : Film) -> Film:
+        result = Film(film.width, film.height, film.num_samples)
+        result.data = aces_tonemap_numpy(film.data)
+        return result
+
+
+    def IntegrateFilmsCPU(films : list[Film]) -> Film:
+        if not films:
+            CoreLogError("Film List is empty")
+            raise ValueError("Film List is empty")
+
+        width = films[0].width
+        height = films[0].height
+
+        # Check all films have the same dimensions
+        for film in films:
+            if film.width != width or film.height != height:
+                raise ValueError("All films must have the same dimensions.")
+
+        total_samples = sum(f.num_samples for f in films)
+        if total_samples == 0:
+            raise ValueError("Total number of samples is zero.")
+
+        # Create output film
+        combined_film = Film(width, height, total_samples)
+
+        # Accumulate weighted sum
+        for film in films:
+            if film.num_samples > 0:
+                weight = film.num_samples / total_samples
+                combined_film.data += film.data * weight
+
+        return combined_film
+
 
 
     def Render(self, scene : Scene, film : Film, num_samples : int = 128, num_bounces : int = 16):
         # Allocate output array on host and device
         # output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
-        output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
+        # output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
 
-        output_device = cuda.to_device(output_host)
+        output_device = cuda.to_device(film.data)
 
         # Set up grid and block dimensions
         block_size = (16, 16)
@@ -521,7 +566,7 @@ class Renderer:
 
 
         # Copy result back to host and save as image
-        output_host = output_device.copy_to_host()
+        film.data = output_device.copy_to_host()
         LogInfo(f"Render finished with total time of {elapsed_time * 0.001 : 0.4f} seconds")
-        image = Image.fromarray(output_host)
-        image.save('gradient.png')
+        # image = Image.fromarray(output_host)
+        # image.save('gradient.png')

@@ -12,7 +12,8 @@ from enum import Enum
 
 class ServerThreadCommands(Enum):
     INVALID = -1
-    SEND_SCENE_DATA = 0
+    SEND_RENDER_COMMAND = 0
+    RECEIVE_FILM_DATA = 1
 
 
 class ServerApp(Application):
@@ -75,14 +76,73 @@ class ServerApp(Application):
         with open(self.scene_path) as f:
             scene_data = f.read()
 
-        # Notify the threads to send the scene data for each client
-        with self.lock:
-            self.command_id = ServerThreadCommands.SEND_SCENE_DATA
-            self.has_command = True
-            self.command_data = scene_data
+        # # Notify the threads to send the scene data for each client
+        # with self.lock:
+        #     self.command_id = ServerThreadCommands.SEND_RENDER_COMMAND
+        #     self.has_command = True
+        #     self.command_data = scene_data
         
 
         # Wait for each thread to finish
+        
+
+
+        # Clear the thread flags
+        # self.__clear_thread_flags()
+
+        # Divide the workload to the available nodes
+        num_samples_per_thread = self.__divide_work(self.num_samples, self.max_clients)
+        thread_ids = list(self.thread_response.keys())
+
+        
+
+        # Send the Render Command
+        with self.lock:
+            self.command_id = ServerThreadCommands.SEND_RENDER_COMMAND
+            self.has_command = True
+            self.command_data = {}
+
+            # TODO: Make sure the num of threads is equal to the thread_ids' length
+            for i, thread_id in enumerate(thread_ids):
+                self.command_data[thread_id] = (num_samples_per_thread[i], scene_data)
+
+
+
+        # Wait for the responses
+        self.__wait_for_threads_to_finish()
+
+        # Clear thread flags
+        self.__clear_thread_flags()
+
+        
+
+
+        # Receive the clients' film data
+
+        # Used to hold the rendered film for each client
+        film_data = {} # Key: Thread_ID, Value: Film Object
+
+
+        # Issue the command to the threads
+        with self.lock:
+            self.command_id = ServerThreadCommands.RECEIVE_FILM_DATA
+            self.command_data = film_data
+            self.has_command = True
+
+        self.__wait_for_threads_to_finish()
+        self.__clear_thread_flags()
+
+        # Post process
+        films = [film_data[thread_id] for thread_id in film_data.keys()]
+        combined_film : Film = Renderer.IntegrateFilmsCPU(films)
+        combined_film = Renderer.PostProcessFilm(combined_film)
+        
+        # Save the image to disk
+        image = Image.fromarray(combined_film.data)
+        image.save('output.png')
+
+
+    def __wait_for_threads_to_finish(self):
         while True:
             num_finished = 0
             for thread_id in self.thread_response:
@@ -94,19 +154,6 @@ class ServerApp(Application):
                 break
 
             time.sleep(0.1)
-
-
-        # Clear the thread flags
-        self.__clear_thread_flags()
-
-        # Divide the workload to the available nodes
-        num_samples_per_thread = self.__divide_work(self.num_samples, self.max_clients)
-
-        # Send the Render Command
-
-        # Wait for the responses
-
-
 
 
 
@@ -156,7 +203,7 @@ class ServerApp(Application):
                 if self.has_command and self.thread_response[thread_id] == False:
                     parse_command = True
                     _command_id = self.command_id
-                    _command_data = self.command_data
+                    _command_data = self.command_data[thread_id]
             
             if parse_command:
                 self._parse_thread_command(connection, _command_id, _command_data=_command_data)
@@ -171,8 +218,17 @@ class ServerApp(Application):
         
 
     def _parse_thread_command(self, conn, _command_id, _command_data):
-        if _command_id == ServerThreadCommands.SEND_SCENE_DATA:
-            SendSceneFile(conn, _command_data)
+        
+        if _command_id == ServerThreadCommands.SEND_RENDER_COMMAND:
+            _num_samples, _scene_data = _command_data
+            SendRenderCommand(conn, _scene_data, _num_samples, self.num_bounces)
+
+        if _command_id == ServerThreadCommands.RECEIVE_FILM_DATA:
+            
+            # Wait for Receive FIlm Command
+            film : Film = ReceiveCommand(conn)
+
+            _command_data = film
 
 
 

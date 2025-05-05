@@ -21,6 +21,7 @@ class CommandHeaders(Enum):
     DISCONNECT = 0
     RENDER = 1
     SCENE_FILE = 2
+    FILM = 3
 
 
 # def SendSceneFile(conn: socket.socket, scene_data : str):
@@ -78,13 +79,12 @@ def ReceiveCommand(conn : socket.socket):
         LogError("No command header received.")
         return
     
-
-    if header == CommandHeaders.SCENE_FILE.value:
-        return ReceiveSceneFile(conn)
-    
     elif header == CommandHeaders.RENDER.value:
         return ReceiveRenderCommand(conn)
     
+    elif header == CommandHeaders.FILM.value:
+        return ReceiveFilmCommand(conn)
+
     else:
         CoreLogError("Unknown Command Header is received.")
         CoreLogError("Exiting....")
@@ -116,7 +116,7 @@ def SendRenderCommand(conn : socket.socket, scene_data : str, num_sample : int, 
         CoreLogInfo(f"Render Command sent! Num of Bounces: {num_bounces}, Num of samples: {num_sample}")
     
     except Exception as e:
-        CoreLogError(f"Failed to send scene file: {e}")
+        CoreLogError(f"Failed to send render command: {e}")
 
 
 def ReceiveRenderCommand(conn : socket.socket):
@@ -176,5 +176,56 @@ def ReceiveRenderCommand(conn : socket.socket):
 
 
     except Exception as e:
-        CoreLogInfo(f"Failed to receive scene file: {e}")
+        CoreLogInfo(f"Failed to receive render command: {e}")
+        return None
+
+
+def SendFilmCommand(conn : socket.socket, film : Film):
+    try:
+        # Send Header
+        header_bytes = struct.pack('B', CommandHeaders.FILM.value)
+        conn.send(header_bytes)
+
+        # Send the Film width, height, and num_samples
+        conn.send(struct.pack(">III", film.width, film.height, film.num_samples))
+
+
+        # Send the flattened film data as bytes (float32)
+        data_bytes = film.data.astype(np.float32).tobytes()
+        conn.sendall(data_bytes)
+    
+    except Exception as e:
+        CoreLogInfo(f"Failed to send film command: {e}")
+        return None
+
+
+
+def ReceiveFilmCommand(conn : socket.socket, film : Film):
+    try:
+        width_height_samples_data = conn.recv(12)
+        if len(width_height_samples_data) < 12:
+            raise ValueError("Film width, height, and num_samples data is incomplete")
+    
+        width, height, num_samples = struct.unpack(">III", width_height_samples_data)
+
+        expected_bytes = width * height * 3 * 4
+
+        # Receive film data
+        received = bytearray()
+        while len(received) < expected_bytes:
+            chunk = conn.recv(expected_bytes - len(received))
+            if not chunk:
+                raise ConnectionError("Disconnected during receiving film data")
+            received.extend(chunk)
+
+        # Convert bytes back into numpy array
+        data = np.frombuffer(received, dtype=np.float32).reshape((height, width, 3))
+
+        # Construct and return Film
+        film = Film(width, height, num_samples)
+        film.data = data
+        return film
+
+    except Exception as e:
+        CoreLogInfo(f"Failed to receive film command: {e}")
         return None

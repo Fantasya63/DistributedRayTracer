@@ -31,8 +31,11 @@ class ClientApp(Application):
         
         # Wait for commands
         LogInfo("Recieving Commands...")
+        
+        # Wait for Render Command
         scene_data = ReceiveCommand(self.client)
-        LogInfo(f"Scene Data: {scene_data}")
+        
+        
 
 
 
