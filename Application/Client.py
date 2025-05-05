@@ -18,8 +18,8 @@ class ClientApp(Application):
         LogInfo("Client app is created.")
         
         # Get IP Address from the user
-        # self.ip_address = GetIPAddress("Enter the ip address of the server.")
-        self.ip_address = GetLocalIP()
+        self.ip_address = GetIPAddress("Enter the ip address of the server: ")
+        # self.ip_address = GetLocalIP()
 
         # Create a client socket
         self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -35,7 +35,7 @@ class ClientApp(Application):
         # Wait for Render Command
         scene_data = ReceiveCommand(self.client)
         
-        
+
 
 
 

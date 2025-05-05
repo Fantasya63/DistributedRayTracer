@@ -41,8 +41,8 @@ class ServerApp(Application):
         LogInfo("Server app is created.")
         LogInfo("")
         LogInfo("Render Properties:")
-        # self.scene_path = GetPath("Enter the filepath to the scene you want to render: ")
-        self.scene_path = "TestData/TestScene.cdscn"
+        self.scene_path = GetPath("Enter the filepath to the scene you want to render: ")
+        # self.scene_path = "TestData/TestScene.cdscn"
 
         self.num_samples = GetPositiveInt("Enter the amount of samples to calculate: ")
         self.num_bounces = GetPositiveInt("Enter the amount of light bounces: ")

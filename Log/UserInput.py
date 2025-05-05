@@ -32,7 +32,7 @@ def GetPath(prompt: str):
 
 def GetIPAddress(prompt: str, _end=""):
     while True:
-        LogInfo(prompt)
+        LogInfo(prompt, _end=_end)
         user_input = input().strip()
 
         try: 
