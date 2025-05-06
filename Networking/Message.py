@@ -108,7 +108,6 @@ def ReceiveRenderCommand(conn : socket.socket):
         # Parse Scene Text into Scene Object
         scene : Scene = Scene()
         scene_serializer : SceneSerializer = SceneSerializer(scene)
-
         scene_serializer.DeserializeSceneRuntimeFromString(scene_text)
 
 
@@ -117,6 +116,9 @@ def ReceiveRenderCommand(conn : socket.socket):
         # Get the film object from the scene's camera
         film : Film = scene.camera.film
         film.num_samples = num_samples
+
+        # Fix Camera FOV
+        scene.camera.set_FOV(90.0)
 
 
         # Init Renderer
