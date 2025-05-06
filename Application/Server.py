@@ -148,6 +148,10 @@ class ServerApp(Application):
         image = Image.fromarray(pixels)
         image.save('output.png')
 
+        LogInfo("Render Complete!")
+        LogInfo("Showing the output image...")
+        image.show()
+
 
     def __wait_for_threads_to_finish(self):
         while True:
