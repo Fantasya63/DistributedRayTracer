@@ -6,7 +6,6 @@ YELLOW = "\033[93m"
 MAGENTA = "\033[95m"
 
 
-
 def LogInfo(_info: str, _end = "\n"):
     print(f"{CYAN}[APP] Info: {_info}{RESET}", end=_end)
 

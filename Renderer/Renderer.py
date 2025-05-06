@@ -423,8 +423,10 @@ def Trace(output, width, height, sphere_position, sphere_radius, sphere_material
     
     # filmic_tonemap(out_color, out_color)
     # Float3ToRGB(output[y, x, :3], out_color)
-    output[y, x, :3] = out_color
-
+    # output[y, x, :3] = out_color
+    output[y, x, 0] = out_color[0]
+    output[y, x, 1] = out_color[1]
+    output[y, x, 2] = out_color[2]
 
 
 class Renderer:
@@ -456,11 +458,26 @@ class Renderer:
 
     def PostProcessFilm(film : Film) -> Film:
         result = Film(film.width, film.height, film.num_samples)
-        result.data = aces_tonemap_numpy(film.data)
+        result.data = Renderer.aces_tonemap_numpy(film.data)
         return result
 
 
-    def IntegrateFilmsCPU(films : list[Film]) -> Film:
+    def Float3ToRGB(_input: np.ndarray) -> np.ndarray:
+        """
+        Convert float32 RGB values in range [0, 1] to uint8 RGB values in range [0, 255].
+
+        Parameters:
+        - _input: np.ndarray of shape (..., 3) and dtype float32
+
+        Returns:
+        - np.ndarray of shape (..., 3) and dtype uint8
+        """
+        clipped = np.clip(_input, 0.0, 1.0)
+        scaled = np.rint(clipped * 255.0).astype(np.uint8)
+        return scaled
+
+
+    def IntegrateFilmsCPU(films) -> Film:
         if not films:
             CoreLogError("Film List is empty")
             raise ValueError("Film List is empty")
@@ -494,8 +511,8 @@ class Renderer:
         # Allocate output array on host and device
         # output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
         # output_host = np.zeros((film.height, film.width, 3), dtype=np.uint8)
-
-        output_device = cuda.to_device(film.data)
+        output_host = np.zeros((film.height, film.width, 3), dtype=np.float32)
+        output_device = cuda.to_device(output_host)
 
         # Set up grid and block dimensions
         block_size = (16, 16)
@@ -568,5 +585,4 @@ class Renderer:
         # Copy result back to host and save as image
         film.data = output_device.copy_to_host()
         LogInfo(f"Render finished with total time of {elapsed_time * 0.001 : 0.4f} seconds")
-        # image = Image.fromarray(output_host)
-        # image.save('gradient.png')
+       

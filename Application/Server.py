@@ -7,6 +7,7 @@ from Networking.Message import *
 import socket
 import threading
 import time
+from PIL import Image
 
 from enum import Enum
 
@@ -120,29 +121,31 @@ class ServerApp(Application):
         # Receive the clients' film data
 
         # Used to hold the rendered film for each client
-        film_data = {} # Key: Thread_ID, Value: Film Object
-
+        # film_data = []
 
         # Issue the command to the threads
         with self.lock:
             self.command_id = ServerThreadCommands.RECEIVE_FILM_DATA
 
-            for thread_id in self.thread_response.keys():
-                self.command_data[thread_id] = None
-                
-            self.command_data = film_data
+            # TODO: Make sure the num of threads is equal to the thread_ids' length
+            for i, thread_id in enumerate(thread_ids):
+                self.command_data = {}
             self.has_command = True
 
         self.__wait_for_threads_to_finish()
+
+        films = [self.command_data[thread_id] for thread_id in self.thread_response.keys()]
+
         self.__clear_thread_flags()
 
-        # Post process
-        films = [film_data[thread_id] for thread_id in film_data.keys()]
         combined_film : Film = Renderer.IntegrateFilmsCPU(films)
         combined_film = Renderer.PostProcessFilm(combined_film)
         
+        pixels = Renderer.Float3ToRGB(combined_film.data)
+        
+
         # Save the image to disk
-        image = Image.fromarray(combined_film.data)
+        image = Image.fromarray(pixels)
         image.save('output.png')
 
 
@@ -208,7 +211,12 @@ class ServerApp(Application):
                 if self.has_command and self.thread_response[thread_id] == False:
                     parse_command = True
                     _command_id = self.command_id
+                    
+                    if thread_id not in self.command_data:
+                        CoreLogInfo(f"Thread ID {thread_id} not found in command_data. Keys: {list(self.command_data.keys())}")
+                        self.command_data[thread_id] = {}  # or handle it appropriately
                     _command_data = self.command_data[thread_id]
+
             
             if parse_command:
                 self._parse_thread_command(connection, _command_id, _command_data=_command_data)
@@ -223,14 +231,16 @@ class ServerApp(Application):
         
 
     def _parse_thread_command(self, conn, _command_id, _command_data):
-        
+        thread_id = threading.get_ident()
+
         if _command_id == ServerThreadCommands.SEND_RENDER_COMMAND:
-            _num_samples, _scene_data = _command_data
+            _num_samples, _scene_data = self.command_data[thread_id]
             SendRenderCommand(conn, _scene_data, _num_samples, self.num_bounces)
 
         if _command_id == ServerThreadCommands.RECEIVE_FILM_DATA:
             
             # Wait for Receive FIlm Command
             film : Film = ReceiveCommand(conn)
-
-            _command_data = film
+            thread_id = threading.get_ident()
+            self.command_data[thread_id] = film
+            _command_data = None

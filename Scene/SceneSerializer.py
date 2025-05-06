@@ -38,7 +38,7 @@ class SceneSerializer:
 
     def DeserializeSceneRuntimeFromString(self, scene_string : str):
         try:
-            scene_data = yaml.safe_load(yaml_string)
+            scene_data = yaml.safe_load(scene_string)
             self.__LoadSceneFromSceneData(scene_data)
 
         except yaml.YAMLError as err:

@@ -7,7 +7,7 @@ from Renderer.Renderer import Renderer
 from Scene.Scene import Scene
 from Scene.SceneSerializer import SceneSerializer
 from Renderer.Film import Film
-
+import numpy as np
 
 MAX_PACKET_SIZE = 4096
 
@@ -71,7 +71,7 @@ def SendRenderCommand(conn : socket.socket, scene_data : str, num_sample : int, 
     except Exception as e:
         CoreLogError(f"Failed to send render command: {e}")
 
-
+# UDP - PlayerPos(0) - 
 def ReceiveRenderCommand(conn : socket.socket):
     try:
         num_bounces_data = conn.recv(4)
@@ -107,7 +107,7 @@ def ReceiveRenderCommand(conn : socket.socket):
 
         # Parse Scene Text into Scene Object
         scene : Scene = Scene()
-        scene_serializer : SceneSerializer = SceneSerializer()
+        scene_serializer : SceneSerializer = SceneSerializer(scene)
 
         scene_serializer.DeserializeSceneRuntimeFromString(scene_text)
 
@@ -154,7 +154,7 @@ def SendFilmCommand(conn : socket.socket, film : Film):
 
 
 
-def ReceiveFilmCommand(conn : socket.socket, film : Film):
+def ReceiveFilmCommand(conn : socket.socket):
     try:
         width_height_samples_data = conn.recv(12)
         if len(width_height_samples_data) < 12:
